@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+
+Description: 'Integrating Lambda with Parameter Store'
+
+Resources:
+##################################################################
+#
+#  Lambda Function accessing SSM Parameter Store
+#
+##################################################################
+  ParameterStoreExampleFunctionDev:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: 'ParameterStoreExampleFunctionDev'
+      Description: 'Integrating lambda with Parameter Store'
+      Handler: 'lambda_function.lambda_handler'
+      Role: !GetAtt ParameterStoreExampleFunctionRoleDev.Arn
+      CodeUri: './code'
+      Environment:
+        Variables:
+          ENV: 'dev'
+          APP_CONFIG_PATH: 'parameterStoreExample'
+          AWS_XRAY_TRACING_NAME: 'ParameterStoreExampleFunctionDev'
+      Runtime: 'python3.6'
+      Timeout: 5
+      Tracing: 'Active'
+
+##################################################################
+#
+#  Lambda Function IAM Role
+#
+##################################################################
+  ParameterStoreExampleFunctionRoleDev:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service:
+                - 'lambda.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        -
+          PolicyName: 'ParameterStoreExampleDevParameterAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - 'ssm:GetParameter*'
+                Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dev/parameterStoreExample*'
+        -
+          PolicyName: 'ParameterStoreExampleDevXRayAccess'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              -
+                Effect: Allow
+                Action:
+                  - 'xray:PutTraceSegments'
+                  - 'xray:PutTelemetryRecords'
+                Resource: '*'
+
+##################################################################
+#
+#  SSM Parameter Store unencrypted parameter
+#
+##################################################################
+  SimpleParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: '/dev/parameterStoreExample/appConfig'
+      Description: 'Sample dev config values for my app'
+      Type: String
+      Value: '{"key1": "value1","key2": "value2","key3": "value3"}'
+
+##################################################################
+#
+#  KMS Alias for encryption key
+#
+##################################################################
+  ParameterStoreExampleDevEncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: 'alias/ParameterStoreExampleKeyDev'
+      TargetKeyId: !Ref ParameterStoreExampleDevEncryptionKey
+
+##################################################################
+#
+#  KMS encryption key and key policy
+#
+##################################################################
+  ParameterStoreExampleDevEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: 'Encryption key for secret config values for the Parameter Store Example post'
+      Enabled: True
+      EnableKeyRotation: False
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: 'key-default-1'
+        Statement:
+          -
+            Sid: 'Allow administration of the key & encryption of new values'
+            Effect: Allow
+            Principal:
+              AWS:
+                - !Sub 'arn:aws:iam::${AWS::AccountId}:user/<USER_ID>'
+            Action:
+              - 'kms:Create*'
+              - 'kms:Encrypt'
+              - 'kms:Describe*'
+              - 'kms:Enable*'
+              - 'kms:List*'
+              - 'kms:Put*'
+              - 'kms:Update*'
+              - 'kms:Revoke*'
+              - 'kms:Disable*'
+              - 'kms:Get*'
+              - 'kms:Delete*'
+              - 'kms:ScheduleKeyDeletion'
+              - 'kms:CancelKeyDeletion'
+            Resource: '*'
+          -
+            Sid: 'Allow use of the key'
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt ParameterStoreExampleFunctionRoleDev.Arn
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: '*'
